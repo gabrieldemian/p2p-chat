@@ -12,4 +12,5 @@ log = "0.4"
 pretty_env_logger = "0.4"
 futures = "0.3"
 clap = {version = "4.0.26", features = ["derive"]}
+async-std = "1.12"
 # speedy = "0.8.4"

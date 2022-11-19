@@ -1,7 +1,10 @@
+use async_std::io;
+use async_std::io::prelude::BufReadExt;
+use clap::Parser;
 use libp2p::{
     core::upgrade,
     futures::StreamExt,
-    gossipsub::{Gossipsub, GossipsubConfig, IdentTopic, MessageAuthenticity},
+    gossipsub::{Gossipsub, GossipsubConfig, GossipsubEvent, IdentTopic, MessageAuthenticity},
     identity::Keypair,
     kad::{store::MemoryStore, Kademlia},
     mplex,
@@ -12,7 +15,10 @@ use libp2p::{
     Multiaddr, NetworkBehaviour, PeerId, Swarm, Transport,
 };
 use log::info;
-use tokio::{select, sync::mpsc};
+use tokio::{
+    select,
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+};
 
 use super::cli::Opt;
 
@@ -24,19 +30,23 @@ pub struct AppBehaviour {
     pub kademlia: Kademlia<MemoryStore>,
 }
 
+#[derive(Debug)]
 pub enum Event {
-    Liebe(Vec<u8>),
+    Dial(Multiaddr),
 }
 
 pub struct Network {
-    pub swarm: Swarm<AppBehaviour>,
     pub peer_id: PeerId,
-    pub event_sender: mpsc::UnboundedSender<Event>,
-    pub event_receiver: mpsc::UnboundedReceiver<Event>,
+    pub topic: IdentTopic,
+    pub swarm: Swarm<AppBehaviour>,
+    pub event_sender: UnboundedSender<Event>,
+    pub event_receiver: UnboundedReceiver<Event>,
 }
 
 impl Network {
-    pub async fn new(opt: &Opt) -> Self {
+    pub async fn new() -> Self {
+        // get the object representing the CLI flags
+        let opt = Opt::parse();
         // generate the peer public key (peerId)
         let keypair = Keypair::generate_ed25519();
         let peer_id = keypair.public().to_peer_id();
@@ -94,12 +104,11 @@ impl Network {
             .listen_on(multiaddr)
             .expect("could not listen on swarm");
 
-        info!("Your PeerID is {peer_id}");
-
-        let (event_sender, event_receiver) = mpsc::unbounded_channel();
+        let (event_sender, event_receiver) = mpsc::unbounded_channel::<Event>();
 
         Self {
             swarm,
+            topic,
             peer_id,
             event_sender,
             event_receiver,
@@ -107,21 +116,76 @@ impl Network {
     }
 
     pub async fn daemon(&mut self) {
+        // Read full lines from stdin
+        let mut stdin = io::BufReader::new(io::stdin()).lines().fuse();
+
         loop {
             select! {
+                line = stdin.select_next_some() => {
+                    if let Err(e) = self.swarm
+                        .behaviour_mut().gossipsub
+                        .publish(
+                            self.topic.clone(),
+                            line.expect("Stdin not to close").as_bytes()
+                        )
+                        {
+                            println!("Publish error: {e:?}");
+                        }
+                },
                 event = self.event_receiver.recv() => {
                     match event.unwrap() {
-                        Event::Liebe(data) => { info!("liebe: {:#?}", data) }
+                        Event::Dial(addr) => {
+                            self.swarm.dial(addr).expect("to call addr");
+                        }
                     };
                 },
                 swarm_event = self.swarm.select_next_some() => match swarm_event {
                     SwarmEvent::NewListenAddr { address, .. } => {
+
                         info!(
                             "Local node is listening on {:?}",
                             address.with(Protocol::P2p(self.peer_id.into()))
                         );
+
+                        // this is actually not needed
+                        // add the newly connected peer to the gossipsub protocol
+                        // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&self.peer_id);
+
+                        let opt = Opt::parse();
+
+                        if let Some(addr) = &opt.peer {
+                            info!("dialing {addr}");
+                            self.event_sender
+                                .send(Event::Dial(addr.clone()))
+                                .expect("to send dial event on mpsc");
+                        };
                     },
+                    SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
+                        if endpoint.is_dialer() {
+                            info!("Connection established - peerId: {peer_id}");
+                        }
+                    }
                     SwarmEvent::Dialing(peer_id) => info!("Dialing {peer_id}"),
+                    SwarmEvent::Behaviour(AppBehaviourEvent::Gossipsub(GossipsubEvent::Subscribed {
+                        peer_id,
+                        topic,
+                    })) => {
+                            info!(
+                                "{peer_id} subscribed to {topic}"
+                            )
+                        }
+                    SwarmEvent::Behaviour(AppBehaviourEvent::Gossipsub(GossipsubEvent::Message {
+                        propagation_source: peer_id,
+                        message,
+                        ..
+                    })) => {
+                            let peer_id = peer_id.to_string();
+                            let peer_id = peer_id[peer_id.len() - 7..].to_string();
+                            println!(
+                                "{peer_id}: {}",
+                                String::from_utf8_lossy(&message.data),
+                            )
+                        }
                     _ => {}
                 },
             };
