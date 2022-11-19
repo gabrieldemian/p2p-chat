@@ -20,7 +20,7 @@ use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
 
-use super::cli::Opt;
+use super::{cli::Opt, utils::utils::draw_cowsay};
 
 // defines the behaviour of the current peer
 // on the network
@@ -118,6 +118,15 @@ impl Network {
     pub async fn daemon(&mut self) {
         // Read full lines from stdin
         let mut stdin = io::BufReader::new(io::stdin()).lines().fuse();
+        let msg = concat!(
+            "To start sending messages, you first need to know your friend multiaddr. ",
+            "Look for a log that starts with \"/ip4/192...\" and send to your friend.\n",
+            "1. Alice - listen for events: RUST_LOG=info cargo run\n",
+            "2. Bob - dial Bob multiaddr: RUST_LOG=info cargo run -- --peer /ip4/x.x.x.x/tcp/xxxxx\n",
+            "Now they are connected and can start sending messages on the terminal."
+        );
+
+        draw_cowsay(msg.to_string());
 
         loop {
             select! {
