@@ -1,0 +1,15 @@
+[package]
+name = "p2p-chat"
+version = "0.0.1"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+libp2p = {version = "0.49", features = ["mplex", "gossipsub", "identify", "noise", "tcp", "tokio", "kad"]}
+tokio = {version = "1.15", features = ["io-util", "io-std", "macros", "rt", "rt-multi-thread", "sync"]}
+log = "0.4"
+pretty_env_logger = "0.4"
+futures = "0.3"
+clap = {version = "4.0.26", features = ["derive"]}
+# speedy = "0.8.4"
