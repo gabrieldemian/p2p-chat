@@ -68,6 +68,7 @@ impl Network {
         let message_authenticity = MessageAuthenticity::Signed(keypair.clone());
 
         // protocol - kademlia
+        // this is not being used at the moment.
         let kademlia = Kademlia::new(peer_id, MemoryStore::new(peer_id));
 
         // protocol - gossipsub
@@ -125,7 +126,6 @@ impl Network {
             "2. Bob - dial Bob multiaddr: RUST_LOG=info cargo run -- --peer /ip4/x.x.x.x/tcp/xxxxx\n",
             "Now they are connected and can start sending messages on the terminal."
         );
-
         draw_cowsay(msg.to_string());
 
         loop {
@@ -144,7 +144,12 @@ impl Network {
                 event = self.event_receiver.recv() => {
                     match event.unwrap() {
                         Event::Dial(addr) => {
-                            self.swarm.dial(addr).expect("to call addr");
+                            let peer_id = match addr.iter().last() {
+                                Some(Protocol::P2p(hash)) => PeerId::from_multihash(hash).expect("Valid hash."),
+                                _ => return ()
+                            };
+                            self.swarm.dial(addr.clone()).expect("to call addr");
+                            self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
                         }
                     };
                 },
@@ -156,10 +161,6 @@ impl Network {
                             address.with(Protocol::P2p(self.peer_id.into()))
                         );
 
-                        // this is actually not needed
-                        // add the newly connected peer to the gossipsub protocol
-                        // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&self.peer_id);
-
                         let opt = Opt::parse();
 
                         if let Some(addr) = &opt.peer {
@@ -168,6 +169,9 @@ impl Network {
                                 .send(Event::Dial(addr.clone()))
                                 .expect("to send dial event on mpsc");
                         };
+                    },
+                    SwarmEvent::Behaviour(AppBehaviourEvent::Kademlia(e)) => {
+                        info!("Received kademlia event {:#?}", e);
                     },
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
                         if endpoint.is_dialer() {
