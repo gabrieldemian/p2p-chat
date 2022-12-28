@@ -6,15 +6,15 @@ use libp2p::{
     futures::StreamExt,
     gossipsub::{Gossipsub, GossipsubConfig, GossipsubEvent, IdentTopic, MessageAuthenticity},
     identity::Keypair,
-    kad::{store::MemoryStore, Kademlia},
+    kad::{store::MemoryStore, Kademlia, KademliaEvent},
     mplex,
     multiaddr::Protocol,
     noise::NoiseAuthenticated,
-    swarm::{SwarmBuilder, SwarmEvent},
-    tcp::{GenTcpConfig, TokioTcpTransport},
-    Multiaddr, NetworkBehaviour, PeerId, Swarm, Transport,
+    swarm::{NetworkBehaviour, SwarmBuilder, SwarmEvent},
+    tcp::{self, Config},
+    Multiaddr, PeerId, Swarm, Transport,
 };
-use log::info;
+use log::{error, info};
 use tokio::{
     select,
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -25,6 +25,7 @@ use super::{cli::Opt, utils::utils::draw_cowsay};
 // defines the behaviour of the current peer
 // on the network
 #[derive(NetworkBehaviour)]
+#[behaviour(out_event = "Event")]
 pub struct AppBehaviour {
     pub gossipsub: Gossipsub,
     pub kademlia: Kademlia<MemoryStore>,
@@ -33,6 +34,20 @@ pub struct AppBehaviour {
 #[derive(Debug)]
 pub enum Event {
     Dial(Multiaddr),
+    Kademlia(KademliaEvent),
+    Gossipsub(GossipsubEvent),
+}
+
+impl From<KademliaEvent> for Event {
+    fn from(event: KademliaEvent) -> Self {
+        Event::Kademlia(event)
+    }
+}
+
+impl From<GossipsubEvent> for Event {
+    fn from(event: GossipsubEvent) -> Self {
+        Event::Gossipsub(event)
+    }
 }
 
 pub struct Network {
@@ -53,8 +68,8 @@ impl Network {
 
         // instantiate the TCP protocol, with noise cryptography
         // and multiplexed
-        let transport_config = GenTcpConfig::new().port_reuse(true);
-        let transport = TokioTcpTransport::new(transport_config)
+        let transport_config = Config::new().port_reuse(true);
+        let transport = tcp::tokio::Transport::new(transport_config)
             .upgrade(upgrade::Version::V1)
             .authenticate(
                 NoiseAuthenticated::xx(&keypair)
@@ -88,11 +103,7 @@ impl Network {
                 gossipsub,
                 kademlia,
             };
-            SwarmBuilder::new(transport, behaviour, peer_id)
-                .executor(Box::new(|fut| {
-                    tokio::spawn(fut);
-                }))
-                .build()
+            SwarmBuilder::with_tokio_executor(transport, behaviour, peer_id).build()
         };
 
         let multiaddr: Multiaddr = match &opt.listen_address {
@@ -143,25 +154,50 @@ impl Network {
                 },
                 event = self.event_receiver.recv() => {
                     match event.unwrap() {
+                        Event::Gossipsub(event) => {
+                            match event {
+                                GossipsubEvent::Subscribed{peer_id, topic} => {
+                                    info!(
+                                        "{peer_id} subscribed to {topic}"
+                                    )
+                                },
+                                GossipsubEvent::Message{propagation_source: peer_id, message, ..} => {
+                                    let peer_id = peer_id.to_string();
+                                    let peer_id = peer_id[peer_id.len() - 7..].to_string();
+                                    println!(
+                                        "{peer_id}: {}",
+                                        String::from_utf8_lossy(&message.data),
+                                    )
+                                },
+                                GossipsubEvent::Unsubscribed{..} => {},
+                                GossipsubEvent::GossipsubNotSupported{..} => {
+                                    error!("Gossipsub is not supported.")
+                                },
+                            }
+                        },
+                        Event::Kademlia(_event) => {},
                         Event::Dial(addr) => {
                             let peer_id = match addr.iter().last() {
-                                Some(Protocol::P2p(hash)) => PeerId::from_multihash(hash).expect("Valid hash."),
+                                Some(Protocol::P2p(hash)) => {
+                                    info!("Dialing: {addr}");
+                                    PeerId::from_multihash(hash).expect("Valid hash.")
+                                }
                                 _ => return ()
                             };
                             self.swarm.dial(addr.clone()).expect("to call addr");
-                            self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
+                            self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                         }
                     };
                 },
                 swarm_event = self.swarm.select_next_some() => match swarm_event {
                     SwarmEvent::NewListenAddr { address, .. } => {
-
                         info!(
                             "Local node is listening on {:?}",
                             address.with(Protocol::P2p(self.peer_id.into()))
                         );
-
                         let opt = Opt::parse();
+
+                        self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&self.peer_id);
 
                         if let Some(addr) = &opt.peer {
                             info!("dialing {addr}");
@@ -170,7 +206,7 @@ impl Network {
                                 .expect("to send dial event on mpsc");
                         };
                     },
-                    SwarmEvent::Behaviour(AppBehaviourEvent::Kademlia(e)) => {
+                    SwarmEvent::Behaviour(Event::Kademlia(e)) => {
                         info!("Received kademlia event {:#?}", e);
                     },
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
@@ -178,27 +214,6 @@ impl Network {
                             info!("Connection established - peerId: {peer_id}");
                         }
                     }
-                    SwarmEvent::Dialing(peer_id) => info!("Dialing {peer_id}"),
-                    SwarmEvent::Behaviour(AppBehaviourEvent::Gossipsub(GossipsubEvent::Subscribed {
-                        peer_id,
-                        topic,
-                    })) => {
-                            info!(
-                                "{peer_id} subscribed to {topic}"
-                            )
-                        }
-                    SwarmEvent::Behaviour(AppBehaviourEvent::Gossipsub(GossipsubEvent::Message {
-                        propagation_source: peer_id,
-                        message,
-                        ..
-                    })) => {
-                            let peer_id = peer_id.to_string();
-                            let peer_id = peer_id[peer_id.len() - 7..].to_string();
-                            println!(
-                                "{peer_id}: {}",
-                                String::from_utf8_lossy(&message.data),
-                            )
-                        }
                     _ => {}
                 },
             };
