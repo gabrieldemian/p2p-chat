@@ -162,7 +162,8 @@ impl Network {
                             self.swarm.dial(addr.clone()).expect("to call addr");
                             self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
                         },
-                        _ => {}
+                        Event::Kademlia(e) => {info!("unhandled {:#?}", e)},
+                        _ => {info!("not handled event")}
                     };
                 },
                 swarm_event = self.swarm.select_next_some() => match swarm_event {
