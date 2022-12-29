@@ -14,7 +14,7 @@ use libp2p::{
     tcp::{self, Config},
     Multiaddr, PeerId, Swarm, Transport,
 };
-use log::{error, info};
+use log::info;
 use tokio::{
     select,
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -89,7 +89,7 @@ impl Network {
         // protocol - gossipsub
         let gossipsub_config = GossipsubConfig::default();
         let mut gossipsub = Gossipsub::new(message_authenticity, gossipsub_config)
-            .expect("could not create gossipsub");
+            .expect("could not create gossipsub interface");
 
         let topic = IdentTopic::new("secret-room");
 
@@ -154,39 +154,15 @@ impl Network {
                 },
                 event = self.event_receiver.recv() => {
                     match event.unwrap() {
-                        Event::Gossipsub(event) => {
-                            match event {
-                                GossipsubEvent::Subscribed{peer_id, topic} => {
-                                    info!(
-                                        "{peer_id} subscribed to {topic}"
-                                    )
-                                },
-                                GossipsubEvent::Message{propagation_source: peer_id, message, ..} => {
-                                    let peer_id = peer_id.to_string();
-                                    let peer_id = peer_id[peer_id.len() - 7..].to_string();
-                                    println!(
-                                        "{peer_id}: {}",
-                                        String::from_utf8_lossy(&message.data),
-                                    )
-                                },
-                                GossipsubEvent::Unsubscribed{..} => {},
-                                GossipsubEvent::GossipsubNotSupported{..} => {
-                                    error!("Gossipsub is not supported.")
-                                },
-                            }
-                        },
-                        Event::Kademlia(_event) => {},
                         Event::Dial(addr) => {
                             let peer_id = match addr.iter().last() {
-                                Some(Protocol::P2p(hash)) => {
-                                    info!("Dialing: {addr}");
-                                    PeerId::from_multihash(hash).expect("Valid hash.")
-                                }
+                                Some(Protocol::P2p(hash)) => PeerId::from_multihash(hash).expect("Valid hash."),
                                 _ => return ()
                             };
                             self.swarm.dial(addr.clone()).expect("to call addr");
-                            self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                        }
+                            self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
+                        },
+                        _ => {}
                     };
                 },
                 swarm_event = self.swarm.select_next_some() => match swarm_event {
@@ -195,12 +171,10 @@ impl Network {
                             "Local node is listening on {:?}",
                             address.with(Protocol::P2p(self.peer_id.into()))
                         );
+
                         let opt = Opt::parse();
 
-                        self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&self.peer_id);
-
                         if let Some(addr) = &opt.peer {
-                            info!("dialing {addr}");
                             self.event_sender
                                 .send(Event::Dial(addr.clone()))
                                 .expect("to send dial event on mpsc");
@@ -214,6 +188,27 @@ impl Network {
                             info!("Connection established - peerId: {peer_id}");
                         }
                     }
+                    SwarmEvent::Dialing(peer_id) => info!("Dialing {peer_id}"),
+                    SwarmEvent::Behaviour(Event::Gossipsub(GossipsubEvent::Subscribed {
+                        peer_id,
+                        topic,
+                    })) => {
+                            info!(
+                                "{peer_id} subscribed to {topic}"
+                            )
+                        }
+                    SwarmEvent::Behaviour(Event::Gossipsub(GossipsubEvent::Message {
+                        propagation_source: peer_id,
+                        message,
+                        ..
+                    })) => {
+                            let peer_id = peer_id.to_string();
+                            let peer_id = peer_id[peer_id.len() - 7..].to_string();
+                            println!(
+                                "{peer_id}: {}",
+                                String::from_utf8_lossy(&message.data),
+                            )
+                        },
                     _ => {}
                 },
             };
