@@ -1,15 +1,15 @@
+use libp2p_noise as noise;
 use async_std::io;
 use async_std::io::prelude::BufReadExt;
 use clap::Parser;
 use libp2p::{
     core::upgrade,
     futures::StreamExt,
-    gossipsub::{Gossipsub, GossipsubConfig, GossipsubEvent, IdentTopic, MessageAuthenticity},
+    gossipsub::{self, IdentTopic},
     identity::Keypair,
     kad::{store::MemoryStore, Kademlia, KademliaEvent},
-    mplex,
+    yamux,
     multiaddr::Protocol,
-    noise::NoiseAuthenticated,
     swarm::{NetworkBehaviour, SwarmBuilder, SwarmEvent},
     tcp::{self, Config},
     Multiaddr, PeerId, Swarm, Transport,
@@ -27,7 +27,7 @@ use super::{cli::Opt, utils::utils::draw_cowsay};
 #[derive(NetworkBehaviour)]
 #[behaviour(out_event = "Event")]
 pub struct AppBehaviour {
-    pub gossipsub: Gossipsub,
+    pub gossipsub: gossipsub::Behaviour,
     pub kademlia: Kademlia<MemoryStore>,
 }
 
@@ -35,7 +35,7 @@ pub struct AppBehaviour {
 pub enum Event {
     Dial(Multiaddr),
     Kademlia(KademliaEvent),
-    Gossipsub(GossipsubEvent),
+    Gossipsub(gossipsub::Event),
 }
 
 impl From<KademliaEvent> for Event {
@@ -44,8 +44,8 @@ impl From<KademliaEvent> for Event {
     }
 }
 
-impl From<GossipsubEvent> for Event {
-    fn from(event: GossipsubEvent) -> Self {
+impl From<gossipsub::Event> for Event {
+    fn from(event: gossipsub::Event) -> Self {
         Event::Gossipsub(event)
     }
 }
@@ -72,23 +72,23 @@ impl Network {
         let transport = tcp::tokio::Transport::new(transport_config)
             .upgrade(upgrade::Version::V1)
             .authenticate(
-                NoiseAuthenticated::xx(&keypair)
+                noise::Config::new(&keypair)
                     .expect("Signing libp2p-noise static DH keypair failed."),
             )
-            .multiplex(mplex::MplexConfig::new())
+            .multiplex(yamux::Config::default())
             .boxed();
 
         // the message authenticity - How we expect to publish messages
         // the publisher will sign the message with his key
-        let message_authenticity = MessageAuthenticity::Signed(keypair.clone());
+        let message_authenticity = gossipsub::MessageAuthenticity::Signed(keypair.clone());
 
         // protocol - kademlia
         // this is not being used at the moment.
         let kademlia = Kademlia::new(peer_id, MemoryStore::new(peer_id));
 
         // protocol - gossipsub
-        let gossipsub_config = GossipsubConfig::default();
-        let mut gossipsub = Gossipsub::new(message_authenticity, gossipsub_config)
+        let gossipsub_config = gossipsub::Config::default();
+        let mut gossipsub = gossipsub::Behaviour::new(message_authenticity, gossipsub_config)
             .expect("could not create gossipsub interface");
 
         let topic = IdentTopic::new("secret-room");
@@ -190,7 +190,7 @@ impl Network {
                         }
                     }
                     SwarmEvent::Dialing(peer_id) => info!("Dialing {peer_id}"),
-                    SwarmEvent::Behaviour(Event::Gossipsub(GossipsubEvent::Subscribed {
+                    SwarmEvent::Behaviour(Event::Gossipsub(gossipsub::Event::Subscribed {
                         peer_id,
                         topic,
                     })) => {
@@ -198,7 +198,7 @@ impl Network {
                                 "{peer_id} subscribed to {topic}"
                             )
                         }
-                    SwarmEvent::Behaviour(Event::Gossipsub(GossipsubEvent::Message {
+                    SwarmEvent::Behaviour(Event::Gossipsub(gossipsub::Event::Message {
                         propagation_source: peer_id,
                         message,
                         ..
