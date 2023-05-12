@@ -91,6 +91,7 @@ impl Network {
         let mut gossipsub = gossipsub::Behaviour::new(message_authenticity, gossipsub_config)
             .expect("could not create gossipsub interface");
 
+        // topic
         let topic = IdentTopic::new("secret-room");
 
         gossipsub

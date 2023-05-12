@@ -1,4 +1,9 @@
 mod models;
+mod crossterm;
+mod app;
+mod ui;
+mod chat_room;
+mod topic_list;
 use models::network::Network;
 use tokio::spawn;
 

@@ -14,4 +14,6 @@ futures = "0.3.28"
 clap = {version = "4.2.7", features = ["derive"]}
 async-std = "1.12"
 libp2p-noise = "0.42.2"
+crossterm = "0.26.1"
+tui = "0.19.0"
 # speedy = "0.8.4"
