@@ -5,6 +5,7 @@ use libp2p::{
     gossipsub::{self, IdentTopic},
     identity::Keypair,
     kad::{store::MemoryStore, Kademlia, KademliaEvent},
+    mdns,
     multiaddr::Protocol,
     swarm::{NetworkBehaviour, SwarmBuilder, SwarmEvent},
     tcp::{self, Config},
@@ -12,15 +13,15 @@ use libp2p::{
 };
 use libp2p_noise as noise;
 use log::info;
+use std::time::Duration;
 use tokio::{
     select,
-    sync::mpsc::{self, Receiver as MpscReceiver, Sender as MpscSender},
-    sync::{broadcast::Receiver as BroadcastReceiver, broadcast::Sender as BroadcastSender},
+    sync::mpsc::{self, Receiver, Sender},
 };
 
 use crate::GlobalEvent;
 
-use super::{cli::Opt, utils::utils::draw_cowsay};
+use super::cli::Opt;
 
 // defines the behaviour of the current peer
 // on the network
@@ -29,6 +30,7 @@ use super::{cli::Opt, utils::utils::draw_cowsay};
 pub struct AppBehaviour {
     pub gossipsub: gossipsub::Behaviour,
     pub kademlia: Kademlia<MemoryStore>,
+    pub mdns: mdns::tokio::Behaviour,
 }
 
 #[derive(Debug)]
@@ -36,6 +38,7 @@ pub enum Event {
     Dial(Multiaddr),
     Kademlia(KademliaEvent),
     Gossipsub(gossipsub::Event),
+    Mdns(mdns::Event),
 }
 
 impl From<KademliaEvent> for Event {
@@ -50,12 +53,17 @@ impl From<gossipsub::Event> for Event {
     }
 }
 
+impl From<mdns::Event> for Event {
+    fn from(event: mdns::Event) -> Self {
+        Event::Mdns(event)
+    }
+}
+
 pub struct Network {
     pub peer_id: PeerId,
-    pub topic: IdentTopic,
     pub swarm: Swarm<AppBehaviour>,
-    pub event_sender: MpscSender<Event>,
-    pub event_receiver: MpscReceiver<Event>,
+    pub event_sender: Sender<Event>,
+    pub event_receiver: Receiver<Event>,
 }
 
 impl Network {
@@ -70,7 +78,7 @@ impl Network {
         // and multiplexed
         let transport_config = Config::new().port_reuse(true);
         let transport = tcp::tokio::Transport::new(transport_config)
-            .upgrade(upgrade::Version::V1)
+            .upgrade(upgrade::Version::V1Lazy)
             .authenticate(
                 noise::Config::new(&keypair)
                     .expect("Signing libp2p-noise static DH keypair failed."),
@@ -86,23 +94,26 @@ impl Network {
         // this is not being used at the moment.
         let kademlia = Kademlia::new(peer_id, MemoryStore::new(peer_id));
 
+        let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), peer_id).unwrap();
+
         // protocol - gossipsub
-        let gossipsub_config = gossipsub::Config::default();
+        let gossipsub_config = gossipsub::ConfigBuilder::default()
+            .heartbeat_interval(Duration::from_secs(10)) // This is set to aid debugging by not cluttering the log space
+            .validation_mode(gossipsub::ValidationMode::Strict) // This sets the kind of message validation. The default is Strict (enforce message signing)
+            .build()
+            .expect("Valid config");
+
         let mut gossipsub = gossipsub::Behaviour::new(message_authenticity, gossipsub_config)
             .expect("could not create gossipsub interface");
 
-        // topic
-        let topic = IdentTopic::new("secret-room");
-
-        gossipsub
-            .subscribe(&topic)
-            .expect("could not subscribe to topic");
+        gossipsub.subscribe(&IdentTopic::new("0")).unwrap();
 
         // swarm manages all events, events, and protocols
         let mut swarm = {
             let behaviour = AppBehaviour {
                 gossipsub,
                 kademlia,
+                mdns,
             };
             SwarmBuilder::with_tokio_executor(transport, behaviour, peer_id).build()
         };
@@ -117,39 +128,32 @@ impl Network {
             .listen_on(multiaddr)
             .expect("could not listen on swarm");
 
-        let (event_sender, event_receiver) = mpsc::channel::<Event>(3);
+        let (event_sender, event_receiver) = mpsc::channel::<Event>(20);
 
         Self {
             swarm,
-            topic,
             peer_id,
             event_sender,
             event_receiver,
         }
     }
 
-    pub async fn daemon(
-        &mut self,
-        tx: BroadcastSender<GlobalEvent>,
-        mut rx: BroadcastReceiver<GlobalEvent>,
-    ) -> () {
-        // Read full lines from stdin
-        // let mut stdin = io::BufReader::new(io::stdin()).lines().fuse();
-        let msg = concat!(
-            "To start sending messages, you first need to know your friend multiaddr. ",
-            "Look for a log that starts with \"/ip4/192...\" and send to your friend.\n",
-            "1. Alice - listen for events: RUST_LOG=info cargo run\n",
-            "2. Bob - dial Bob multiaddr: RUST_LOG=info cargo run -- --peer /ip4/x.x.x.x/tcp/xxxxx\n",
-            "Now they are connected and can start sending messages on the terminal."
-        );
-        draw_cowsay(msg.to_string());
-
+    pub async fn daemon(&mut self, tx: Sender<GlobalEvent>, mut rx: Receiver<GlobalEvent>) -> () {
         loop {
             select! {
                 event = rx.recv() => {
                     match event.unwrap() {
+                        GlobalEvent::MessageReceived(topic, message) => {
+                            info!("-------- msg aaa");
+                            self.swarm.behaviour_mut().gossipsub.publish(topic, message.as_bytes()).expect("to send message on network");
+                        },
                         GlobalEvent::Quit => return (),
-                        _ => {}
+                        GlobalEvent::Subscribed(topic) => {
+                            info!("subscribed ??");
+                            self.swarm.behaviour_mut().gossipsub
+                                .subscribe(&topic)
+                                .expect("could not subscribe to topic");
+                        },
                     }
                 },
                 event = self.event_receiver.recv() => {
@@ -163,7 +167,7 @@ impl Network {
                             self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
                         },
                         Event::Kademlia(e) => {info!("unhandled {:#?}", e)},
-                        _ => {info!("not handled event")}
+                        _ => {info!("not handled kademlia event received")}
                     };
                 },
                 swarm_event = self.swarm.select_next_some() => match swarm_event {
@@ -181,34 +185,47 @@ impl Network {
                         };
                     },
                     SwarmEvent::Behaviour(Event::Kademlia(e)) => {
-                        info!("Received kademlia event {:#?}", e);
+                        // info!("Received kademlia event {:#?}", e);
                     },
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
-                        if endpoint.is_dialer() {
-                            info!("Connection established - peerId: {peer_id}");
-                        }
+                        // if endpoint.is_dialer() {
+                        //     info!("Connection established - peerId: {peer_id}");
+                        // }
                     }
                     SwarmEvent::Dialing(peer_id) => info!("Dialing {peer_id}"),
                     SwarmEvent::Behaviour(Event::Gossipsub(gossipsub::Event::Subscribed {
                         peer_id,
                         topic,
                     })) => {
-                            info!(
-                                "{peer_id} subscribed to {topic}"
-                            )
-                        }
+                        // info!(
+                        //     "{peer_id} subscribed to {topic}"
+                        // );
+                    }
                     SwarmEvent::Behaviour(Event::Gossipsub(gossipsub::Event::Message {
                         propagation_source: peer_id,
                         message,
                         ..
                     })) => {
-                            let peer_id = peer_id.to_string();
-                            let peer_id = peer_id[peer_id.len() - 7..].to_string();
-                            println!(
-                                "{peer_id}: {}",
-                                String::from_utf8_lossy(&message.data),
-                            )
-                        },
+                        let msg = String::from_utf8_lossy(&message.data);
+                            info!("received msg {msg}");
+                        let peer_id = peer_id.to_string();
+                        let peer_id = peer_id[peer_id.len() - 7..].to_string();
+                        // println!(
+                        //     "{peer_id}: {}",
+                        //     String::from_utf8_lossy(&message.data),
+                        // )
+                    },
+                    SwarmEvent::Behaviour(Event::Mdns(mdns::Event::Discovered(list))) => {
+                        for (peer_id, _multiaddr) in list {
+                            // info!("discovered new peer {peer_id}");
+                            self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                        }
+                    },
+                    SwarmEvent::Behaviour(Event::Mdns(mdns::Event::Expired(list))) => {
+                        for (peer_id, _multiaddr) in list {
+                            self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
+                        }
+                    },
                     _ => {}
                 },
             };

@@ -1,6 +1,7 @@
-use std::sync::mpsc::Sender;
-
 use crossterm::event::KeyCode;
+use libp2p::gossipsub::IdentTopic;
+use log::info;
+use tokio::sync::mpsc::Sender;
 use tui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout},
@@ -13,6 +14,7 @@ use tui::{
 use crate::{
     app::{AppEvent, AppStyle, Page},
     topic_list::TopicList,
+    GlobalEvent,
 };
 
 #[derive(Clone, Debug)]
@@ -27,6 +29,7 @@ pub struct ChatRoom {
     pub items: Vec<String>,
     pub input_mode: InputMode,
     pub input: String,
+    pub name: String,
 }
 
 impl Default for ChatRoom {
@@ -37,6 +40,7 @@ impl Default for ChatRoom {
         let items = vec!["Esta mensagem ja estava aqui antes".to_string()];
 
         Self {
+            name: "0".to_string(),
             state,
             items,
             input: String::new(),
@@ -46,23 +50,47 @@ impl Default for ChatRoom {
 }
 
 impl ChatRoom {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(name: String) -> Self {
+        let mut state = ListState::default();
+        state.select(Some(0));
+
+        let items = vec![];
+
+        Self {
+            name: name.to_string(),
+            state,
+            items,
+            input: String::new(),
+            input_mode: InputMode::Normal,
+        }
     }
 
-    pub fn keybindings(&mut self, k: KeyCode, tx: &Sender<AppEvent>) {
+    pub async fn keybindings<'a>(
+        &mut self,
+        k: KeyCode,
+        tx: &Sender<AppEvent<'a>>,
+        tx_global: &Sender<GlobalEvent>,
+    ) {
         match &self.input_mode {
             InputMode::Normal => match k {
                 KeyCode::Char('i') => self.input_mode = InputMode::Insert,
-                // KeyCode::Char('q') | KeyCode::Esc => tx.send(AppEvent::Quit).unwrap(),
                 KeyCode::Char('q') | KeyCode::Esc => {
                     tx.send(AppEvent::ChangePage(Page::TopicList(TopicList::new())))
-                        .unwrap();
+                        .await.unwrap();
                 }
                 _ => {}
             },
             InputMode::Insert => match k {
-                KeyCode::Enter => self.items.push(self.input.drain(..).collect()),
+                KeyCode::Enter => {
+                    let topic = IdentTopic::new(self.name.clone());
+                    if let Ok(_) = tx_global
+                        .send(GlobalEvent::MessageReceived(topic, self.input.clone()))
+                        .await
+                    {
+                        info!("keycode:enter msg here");
+                        self.items.push(self.input.drain(..).collect());
+                    }
+                }
                 KeyCode::Char(c) => {
                     self.input.push(c);
                 }

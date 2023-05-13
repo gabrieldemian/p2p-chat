@@ -1,6 +1,5 @@
-use std::sync::mpsc::{self, Receiver, Sender};
-
 use crate::{chat_room::ChatRoom, topic_list::*};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tui::{
     style::{Color, Style},
     widgets::StatefulWidget,
@@ -15,6 +14,7 @@ where
     pub items: I,
 }
 
+#[derive(Debug, Clone)]
 pub enum Page<'a> {
     TopicList(TopicList<'a>),
     ChatRoom(ChatRoom),
@@ -26,6 +26,7 @@ pub struct AppStyle {
     pub normal_style: Style,
 }
 
+#[derive(Debug, Clone)]
 pub enum AppEvent<'a> {
     ChangePage(Page<'a>),
     Quit,
@@ -55,7 +56,7 @@ impl<'a> App<'a> {
         let topic_list = TopicList::new();
         let page = Page::TopicList(topic_list);
 
-        let (tx, rx) = mpsc::channel::<AppEvent>();
+        let (tx, rx) = mpsc::channel::<AppEvent>(20);
 
         App {
             style,

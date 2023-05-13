@@ -1,6 +1,6 @@
-use std::sync::mpsc::Sender;
-
 use crossterm::event::KeyCode;
+use libp2p::gossipsub::IdentTopic;
+use tokio::sync::mpsc::Sender;
 use tui::{
     backend::Backend,
     layout::Constraint,
@@ -11,6 +11,7 @@ use tui::{
 use crate::{
     app::{AppEvent, AppStyle, Page},
     chat_room::ChatRoom,
+    GlobalEvent,
 };
 
 #[derive(Clone, Debug)]
@@ -25,11 +26,11 @@ impl<'a> Default for TopicList<'a> {
         state.select(Some(0));
 
         let items = vec![
-            vec!["5", "Rust async", "Row13"],
-            vec!["3", "How to cook better", "Row23"],
-            vec!["8", "Hiking organization", "Row33"],
-            vec!["2", "Secret meeting to rule to world", "Row43"],
-            vec!["1", "Talk about cats", "Row53"],
+            vec!["5", "Rust async"],
+            vec!["3", "How to cook better"],
+            vec!["8", "Hiking organization"],
+            vec!["2", "Secret meeting to rule to world"],
+            vec!["1", "Talk about cats"],
         ];
         Self { state, items }
     }
@@ -40,21 +41,31 @@ impl<'a> TopicList<'a> {
         Self::default()
     }
 
-    pub fn keybindings(&mut self, k: KeyCode, tx: &Sender<AppEvent>) {
+    pub async fn keybindings(
+        &mut self,
+        k: KeyCode,
+        tx: &Sender<AppEvent<'a>>,
+        tx_global: &Sender<GlobalEvent>,
+    ) {
         match k {
-            KeyCode::Char('q') | KeyCode::Esc => tx.send(AppEvent::Quit).unwrap(),
+            KeyCode::Char('q') | KeyCode::Esc => tx.send(AppEvent::Quit).await.unwrap(),
             KeyCode::Down | KeyCode::Char('j') => self.next(),
             KeyCode::Up | KeyCode::Char('k') => self.previous(),
             KeyCode::Enter => {
-                let chat_room = Page::ChatRoom(ChatRoom::new());
-                tx.send(AppEvent::ChangePage(chat_room)).unwrap()
+                let topic_index = self.state.selected().unwrap().to_string();
+                let topic = IdentTopic::new(topic_index.clone());
+
+                let chat_room = Page::ChatRoom(ChatRoom::new(topic_index));
+
+                tx_global.send(GlobalEvent::Subscribed(topic)).await.unwrap();
+                tx.send(AppEvent::ChangePage(chat_room)).await.unwrap();
             }
             _ => {}
         }
     }
 
     pub fn draw<B: Backend>(&mut self, f: &mut Frame<B>, style: &AppStyle) {
-        let header_cells = ["Online", "Name", "Header3"]
+        let header_cells = ["Online", "Name"]
             .into_iter()
             .map(|h| Cell::from(h).style(style.normal_style));
 
@@ -79,11 +90,7 @@ impl<'a> TopicList<'a> {
             .block(Block::default().borders(Borders::ALL).title("Chat Rooms"))
             .highlight_style(style.selected_style)
             .style(style.base_style)
-            .widths(&[
-                Constraint::Percentage(10),
-                Constraint::Length(80),
-                Constraint::Min(10),
-            ]);
+            .widths(&[Constraint::Percentage(10), Constraint::Length(90)]);
 
         f.render_stateful_widget(t, f.size(), &mut self.state);
     }

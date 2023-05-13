@@ -13,11 +13,12 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
-use tokio::sync::broadcast::{Receiver, Sender};
+use libp2p::gossipsub::IdentTopic;
+use tokio::sync::mpsc::Sender;
 use tui::backend::Backend;
 use tui::{backend::CrosstermBackend, Terminal};
 
-pub async fn run(tx: Sender<GlobalEvent>, rx: Receiver<GlobalEvent>) -> Result<(), io::Error> {
+pub async fn run(tx_global: &Sender<GlobalEvent>) -> Result<(), io::Error> {
     // setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -27,7 +28,7 @@ pub async fn run(tx: Sender<GlobalEvent>, rx: Receiver<GlobalEvent>) -> Result<(
 
     // create app and run it
     let app = app::App::new();
-    let res = run_app(&mut terminal, app, tx, rx).await;
+    let res = run_app(&mut terminal, app, tx_global).await;
 
     // restore terminal
     disable_raw_mode()?;
@@ -48,8 +49,7 @@ pub async fn run(tx: Sender<GlobalEvent>, rx: Receiver<GlobalEvent>) -> Result<(
 pub async fn run_app<'a, B: Backend>(
     terminal: &mut Terminal<B>,
     mut app: app::App<'a>,
-    tx: Sender<GlobalEvent>,
-    mut rx: Receiver<GlobalEvent>,
+    tx_global: &Sender<GlobalEvent>,
 ) -> io::Result<()> {
     let style = AppStyle::new();
     let tick_rate = Duration::from_millis(250);
@@ -66,14 +66,14 @@ pub async fn run_app<'a, B: Backend>(
             Page::ChatRoom(page) => {
                 if event::poll(timeout)? {
                     if let Event::Key(k) = event::read()? {
-                        page.keybindings(k.code, &app.tx);
+                        page.keybindings(k.code, &app.tx, tx_global).await;
                     }
                 }
             }
             Page::TopicList(page) => {
                 if event::poll(timeout)? {
                     if let Event::Key(k) = event::read()? {
-                        page.keybindings(k.code, &app.tx);
+                        page.keybindings(k.code, &app.tx, tx_global).await;
                     }
                 }
             }
@@ -91,7 +91,7 @@ pub async fn run_app<'a, B: Backend>(
         }
 
         if app.should_close {
-            tx.send(GlobalEvent::Quit).expect("to send event to quit");
+            tx_global.send(GlobalEvent::Quit).await.unwrap();
             return Ok(());
         }
     }
