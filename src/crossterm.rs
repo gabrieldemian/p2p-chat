@@ -1,10 +1,9 @@
-use std::error::Error;
 use std::io;
 use std::time::{Duration, Instant};
 
 use crate::app::{self, AppEvent};
 use crate::app::{AppStyle, Page};
-use crate::ui;
+use crate::{ui, GlobalEvent};
 
 use crossterm::event;
 use crossterm::event::Event;
@@ -14,10 +13,11 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
+use tokio::sync::broadcast::{Receiver, Sender};
 use tui::backend::Backend;
 use tui::{backend::CrosstermBackend, Terminal};
 
-pub fn run() -> Result<(), Box<dyn Error>> {
+pub async fn run(tx: Sender<GlobalEvent>, rx: Receiver<GlobalEvent>) -> Result<(), io::Error> {
     // setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -27,7 +27,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
 
     // create app and run it
     let app = app::App::new();
-    let res = run_app(&mut terminal, app);
+    let res = run_app(&mut terminal, app, tx, rx).await;
 
     // restore terminal
     disable_raw_mode()?;
@@ -45,7 +45,12 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: app::App) -> io::Result<()> {
+pub async fn run_app<'a, B: Backend>(
+    terminal: &mut Terminal<B>,
+    mut app: app::App<'a>,
+    tx: Sender<GlobalEvent>,
+    mut rx: Receiver<GlobalEvent>,
+) -> io::Result<()> {
     let style = AppStyle::new();
     let tick_rate = Duration::from_millis(250);
     let mut last_tick = Instant::now();
@@ -86,6 +91,7 @@ pub fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: app::App) -> io:
         }
 
         if app.should_close {
+            tx.send(GlobalEvent::Quit).expect("to send event to quit");
             return Ok(());
         }
     }

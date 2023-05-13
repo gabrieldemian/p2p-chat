@@ -1,6 +1,3 @@
-use libp2p_noise as noise;
-use async_std::io;
-use async_std::io::prelude::BufReadExt;
 use clap::Parser;
 use libp2p::{
     core::upgrade,
@@ -8,17 +5,20 @@ use libp2p::{
     gossipsub::{self, IdentTopic},
     identity::Keypair,
     kad::{store::MemoryStore, Kademlia, KademliaEvent},
-    yamux,
     multiaddr::Protocol,
     swarm::{NetworkBehaviour, SwarmBuilder, SwarmEvent},
     tcp::{self, Config},
-    Multiaddr, PeerId, Swarm, Transport,
+    yamux, Multiaddr, PeerId, Swarm, Transport,
 };
+use libp2p_noise as noise;
 use log::info;
 use tokio::{
     select,
-    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    sync::mpsc::{self, Receiver as MpscReceiver, Sender as MpscSender},
+    sync::{broadcast::Receiver as BroadcastReceiver, broadcast::Sender as BroadcastSender},
 };
+
+use crate::GlobalEvent;
 
 use super::{cli::Opt, utils::utils::draw_cowsay};
 
@@ -54,8 +54,8 @@ pub struct Network {
     pub peer_id: PeerId,
     pub topic: IdentTopic,
     pub swarm: Swarm<AppBehaviour>,
-    pub event_sender: UnboundedSender<Event>,
-    pub event_receiver: UnboundedReceiver<Event>,
+    pub event_sender: MpscSender<Event>,
+    pub event_receiver: MpscReceiver<Event>,
 }
 
 impl Network {
@@ -117,7 +117,7 @@ impl Network {
             .listen_on(multiaddr)
             .expect("could not listen on swarm");
 
-        let (event_sender, event_receiver) = mpsc::unbounded_channel::<Event>();
+        let (event_sender, event_receiver) = mpsc::channel::<Event>(3);
 
         Self {
             swarm,
@@ -128,9 +128,13 @@ impl Network {
         }
     }
 
-    pub async fn daemon(&mut self) {
+    pub async fn daemon(
+        &mut self,
+        tx: BroadcastSender<GlobalEvent>,
+        mut rx: BroadcastReceiver<GlobalEvent>,
+    ) -> () {
         // Read full lines from stdin
-        let mut stdin = io::BufReader::new(io::stdin()).lines().fuse();
+        // let mut stdin = io::BufReader::new(io::stdin()).lines().fuse();
         let msg = concat!(
             "To start sending messages, you first need to know your friend multiaddr. ",
             "Look for a log that starts with \"/ip4/192...\" and send to your friend.\n",
@@ -142,16 +146,11 @@ impl Network {
 
         loop {
             select! {
-                line = stdin.select_next_some() => {
-                    if let Err(e) = self.swarm
-                        .behaviour_mut().gossipsub
-                        .publish(
-                            self.topic.clone(),
-                            line.expect("Stdin not to close").as_bytes()
-                        )
-                        {
-                            println!("Publish error: {e:?}");
-                        }
+                event = rx.recv() => {
+                    match event.unwrap() {
+                        GlobalEvent::Quit => return (),
+                        _ => {}
+                    }
                 },
                 event = self.event_receiver.recv() => {
                     match event.unwrap() {
@@ -178,8 +177,7 @@ impl Network {
 
                         if let Some(addr) = &opt.peer {
                             self.event_sender
-                                .send(Event::Dial(addr.clone()))
-                                .expect("to send dial event on mpsc");
+                                .send(Event::Dial(addr.clone())).await.unwrap();
                         };
                     },
                     SwarmEvent::Behaviour(Event::Kademlia(e)) => {
