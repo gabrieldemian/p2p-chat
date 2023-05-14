@@ -13,12 +13,11 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
-use libp2p::gossipsub::IdentTopic;
 use tokio::sync::mpsc::Sender;
 use tui::backend::Backend;
 use tui::{backend::CrosstermBackend, Terminal};
 
-pub async fn run(tx_global: &Sender<GlobalEvent>) -> Result<(), io::Error> {
+pub async fn run(tx: &Sender<GlobalEvent>) -> Result<(), io::Error> {
     // setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -28,7 +27,7 @@ pub async fn run(tx_global: &Sender<GlobalEvent>) -> Result<(), io::Error> {
 
     // create app and run it
     let app = app::App::new();
-    let res = run_app(&mut terminal, app, tx_global).await;
+    let res = run_app(&mut terminal, app, tx).await;
 
     // restore terminal
     disable_raw_mode()?;

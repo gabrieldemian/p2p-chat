@@ -4,36 +4,39 @@ mod crossterm;
 mod models;
 mod topic_list;
 mod ui;
-use libp2p::gossipsub::IdentTopic;
-use models::network::Network;
-use tokio::{spawn, sync::mpsc};
+use tokio::sync::mpsc::{self, Receiver};
 
-#[derive(Debug, Clone)]
-pub enum GlobalEvent {
-    Quit,
-    MessageReceived(IdentTopic, String),
-    Subscribed(IdentTopic),
+use models::network::{Network, GlobalEvent};
+use tokio::spawn;
+
+#[tokio::main]
+async fn start_tokio(rx: Receiver<GlobalEvent>) {
+    let mut network = Network::new(rx);
+    network.daemon().await;
 }
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
     pretty_env_logger::init();
 
-    let (tx, rx) = mpsc::channel::<GlobalEvent>(20);
-    let tx2 = tx.clone();
+    let (tx, rx) = mpsc::channel::<GlobalEvent>(200);
 
-    let mut network = Network::new().await;
-
-    let daemon_handle = spawn(async move {
-        network.daemon(tx, rx).await;
+    let daemon_handle = std::thread::spawn(move || {
+        start_tokio(rx);
     });
+
+    // let daemon_handle = spawn(async move {
+    //     let mut network = Network::new().await;
+    //     network.daemon(rx).await;
+    // });
 
     let frontend_handle = spawn(async move {
-        crossterm::run(&tx2).await.unwrap();
+        crossterm::run(&tx).await.unwrap();
     });
 
-    daemon_handle.await.expect("to listen to daemon_handle");
+    // daemon_handle.await.expect("to listen to daemon_handle");
     frontend_handle.await.expect("to listen to frontend_handle");
+    daemon_handle.join().unwrap();
 
     Ok(())
 }
