@@ -4,9 +4,15 @@ mod crossterm;
 mod models;
 mod topic_list;
 mod ui;
-use tokio::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 
-use models::network::{Network, GlobalEvent};
+use app::App;
+use tokio::sync::{
+    mpsc::{self, Receiver},
+    Mutex,
+};
+
+use models::network::{GlobalEvent, Network};
 use tokio::spawn;
 
 #[tokio::main]
@@ -21,14 +27,11 @@ async fn main() -> Result<(), String> {
 
     let (tx, rx) = mpsc::channel::<GlobalEvent>(200);
 
+    // let app = Arc::new(Mutex::new(App::new()));
+
     let daemon_handle = std::thread::spawn(move || {
         start_tokio(rx);
     });
-
-    // let daemon_handle = spawn(async move {
-    //     let mut network = Network::new().await;
-    //     network.daemon(rx).await;
-    // });
 
     let frontend_handle = spawn(async move {
         crossterm::run(&tx).await.unwrap();

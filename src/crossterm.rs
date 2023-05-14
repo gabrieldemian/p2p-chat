@@ -1,9 +1,11 @@
 use std::io;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::app::{self, AppEvent};
-use crate::app::{AppStyle, Page};
-use crate::{ui, GlobalEvent};
+use crate::app::Page;
+use crate::app::{App, AppEvent};
+use crate::ui::ui;
+use crate::GlobalEvent;
 
 use crossterm::event;
 use crossterm::event::Event;
@@ -14,6 +16,7 @@ use crossterm::{
 };
 
 use tokio::sync::mpsc::Sender;
+use tokio::sync::Mutex;
 use tui::backend::Backend;
 use tui::{backend::CrosstermBackend, Terminal};
 
@@ -25,8 +28,7 @@ pub async fn run(tx: &Sender<GlobalEvent>) -> Result<(), io::Error> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // create app and run it
-    let app = app::App::new();
+    let app = App::new();
     let res = run_app(&mut terminal, app, tx).await;
 
     // restore terminal
@@ -47,15 +49,16 @@ pub async fn run(tx: &Sender<GlobalEvent>) -> Result<(), io::Error> {
 
 pub async fn run_app<'a, B: Backend>(
     terminal: &mut Terminal<B>,
-    mut app: app::App<'a>,
+    mut app: App<'a>,
     tx_global: &Sender<GlobalEvent>,
 ) -> io::Result<()> {
-    let style = AppStyle::new();
     let tick_rate = Duration::from_millis(250);
     let mut last_tick = Instant::now();
 
     loop {
-        terminal.draw(|f| ui::ui(f, &mut app, &style))?;
+        // let mut app = app.lock().await;
+
+        terminal.draw(|f| ui(f, &mut app))?;
 
         let timeout = tick_rate
             .checked_sub(last_tick.elapsed())

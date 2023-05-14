@@ -13,8 +13,13 @@ use libp2p::{
 };
 use libp2p_noise as noise;
 use log::info;
-use std::time::Duration;
-use tokio::{select, sync::mpsc::Receiver};
+use std::{sync::Arc, time::Duration};
+use tokio::{
+    select,
+    sync::{mpsc::Receiver, Mutex},
+};
+
+use crate::app::{App, Page};
 
 use super::cli::Opt;
 
@@ -196,14 +201,23 @@ impl Network {
                         message,
                         ..
                     })) => {
-                        let msg = String::from_utf8_lossy(&message.data);
-                            info!("received msg {msg}");
                         let peer_id = peer_id.to_string();
                         let peer_id = peer_id[peer_id.len() - 7..].to_string();
-                        println!(
+
+                        let msg = format!(
                             "{peer_id}: {}",
                             String::from_utf8_lossy(&message.data),
-                        )
+                        );
+                        println!("{msg}");
+
+                        // let mut app = app.lock().await;
+                        //
+                        // match &mut app.page {
+                        //     Page::ChatRoom(page) => {
+                        //         page.items.push(msg);
+                        //     },
+                        //     _ => {}
+                        // };
                     },
                     SwarmEvent::Behaviour(GlobalEvent::Mdns(mdns::Event::Discovered(list))) => {
                         for (peer_id, _multiaddr) in list {
