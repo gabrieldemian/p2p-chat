@@ -13,13 +13,13 @@ use libp2p::{
 };
 use libp2p_noise as noise;
 use log::info;
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 use tokio::{
     select,
-    sync::{mpsc::Receiver, Mutex},
+    sync::mpsc::{Receiver, Sender},
 };
 
-use crate::app::{App, Page};
+use crate::BkEvent;
 
 use super::cli::Opt;
 
@@ -67,10 +67,11 @@ pub struct Network {
     pub peer_id: PeerId,
     pub swarm: Swarm<AppBehaviour>,
     pub event_receiver: Receiver<GlobalEvent>,
+    pub event_sender: Sender<GlobalEvent>,
 }
 
 impl Network {
-    pub fn new(rx: Receiver<GlobalEvent>) -> Self {
+    pub fn new(rx: Receiver<GlobalEvent>, tx: Sender<GlobalEvent>) -> Self {
         // get the object representing the CLI flags
         let opt = Opt::parse();
         // generate the peer public key (peerId)
@@ -109,8 +110,6 @@ impl Network {
         let mut gossipsub = gossipsub::Behaviour::new(message_authenticity, gossipsub_config)
             .expect("could not create gossipsub interface");
 
-        gossipsub.subscribe(&IdentTopic::new("0")).unwrap();
-
         // swarm manages all events, events, and protocols
         let mut swarm = {
             let behaviour = AppBehaviour {
@@ -135,10 +134,11 @@ impl Network {
             swarm,
             peer_id,
             event_receiver: rx,
+            event_sender: tx,
         }
     }
 
-    pub async fn daemon(&mut self) -> () {
+    pub async fn daemon(&mut self, tx: Sender<BkEvent>) -> () {
         loop {
             select! {
                 event = self.event_receiver.recv() => {
@@ -153,7 +153,12 @@ impl Network {
                         },
                         GlobalEvent::Kademlia(e) => {info!("unhandled {:#?}", e)},
                         GlobalEvent::MessageReceived(topic, message) => {
-                            self.swarm.behaviour_mut().gossipsub.publish(topic, message.as_bytes()).expect("to send message on network");
+                            if let Err(e) =
+                                self.swarm.behaviour_mut()
+                                .gossipsub.publish(topic, message.as_bytes())
+                            {
+                                info!("could not send msg from daemon {:?}", e);
+                            };
                         },
                         GlobalEvent::Quit => return (),
                         GlobalEvent::Subscribed(topic) => {
@@ -171,15 +176,13 @@ impl Network {
                             "Local node is listening on {:?}",
                             address.with(Protocol::P2p(self.peer_id.into()))
                         );
-
                         let opt = Opt::parse();
-
-                        // if let Some(addr) = &opt.peer {
-                        //     self.event_sender
-                        //         .send(GlobalEvent::Dial(addr.clone())).await.unwrap();
-                        // };
+                        if let Some(addr) = &opt.peer {
+                            self.event_sender
+                                .send(GlobalEvent::Dial(addr.clone())).await.unwrap();
+                        };
                     },
-                    SwarmEvent::Behaviour(GlobalEvent::Kademlia(e)) => {
+                    SwarmEvent::Behaviour(GlobalEvent::Kademlia(_e)) => {
                         // info!("Received kademlia event {:#?}", e);
                     },
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
@@ -208,16 +211,10 @@ impl Network {
                             "{peer_id}: {}",
                             String::from_utf8_lossy(&message.data),
                         );
-                        println!("{msg}");
 
-                        // let mut app = app.lock().await;
-                        //
-                        // match &mut app.page {
-                        //     Page::ChatRoom(page) => {
-                        //         page.items.push(msg);
-                        //     },
-                        //     _ => {}
-                        // };
+                        tx.send(BkEvent::MessageReceived(msg))
+                            .await
+                            .expect("could not send msg from bk to front");
                     },
                     SwarmEvent::Behaviour(GlobalEvent::Mdns(mdns::Event::Discovered(list))) => {
                         for (peer_id, _multiaddr) in list {

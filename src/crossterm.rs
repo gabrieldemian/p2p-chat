@@ -1,11 +1,10 @@
 use std::io;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::app::Page;
 use crate::app::{App, AppEvent};
 use crate::ui::ui;
-use crate::GlobalEvent;
+use crate::{GlobalEvent, BkEvent};
 
 use crossterm::event;
 use crossterm::event::Event;
@@ -15,12 +14,11 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 
-use tokio::sync::mpsc::Sender;
-use tokio::sync::Mutex;
+use tokio::sync::mpsc::{Sender, Receiver};
 use tui::backend::Backend;
 use tui::{backend::CrosstermBackend, Terminal};
 
-pub async fn run(tx: &Sender<GlobalEvent>) -> Result<(), io::Error> {
+pub async fn run(tx: &Sender<GlobalEvent>, rx: Receiver<BkEvent>) -> Result<(), io::Error> {
     // setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -29,7 +27,7 @@ pub async fn run(tx: &Sender<GlobalEvent>) -> Result<(), io::Error> {
     let mut terminal = Terminal::new(backend)?;
 
     let app = App::new();
-    let res = run_app(&mut terminal, app, tx).await;
+    let res = run_app(&mut terminal, app, tx, rx).await;
 
     // restore terminal
     disable_raw_mode()?;
@@ -51,12 +49,12 @@ pub async fn run_app<'a, B: Backend>(
     terminal: &mut Terminal<B>,
     mut app: App<'a>,
     tx_global: &Sender<GlobalEvent>,
+    mut rx: Receiver<BkEvent>,
 ) -> io::Result<()> {
     let tick_rate = Duration::from_millis(250);
     let mut last_tick = Instant::now();
 
     loop {
-        // let mut app = app.lock().await;
 
         terminal.draw(|f| ui(f, &mut app))?;
 
@@ -90,6 +88,19 @@ pub async fn run_app<'a, B: Backend>(
 
         if last_tick.elapsed() >= tick_rate {
             last_tick = Instant::now();
+        }
+
+        match &mut app.page {
+            Page::ChatRoom(page) => {
+                if let Ok(d) = rx.try_recv() {
+                    match d {
+                        BkEvent::MessageReceived(msg) => {
+                            page.items.push(msg);
+                        }
+                    }
+                }
+            },
+            _ => {}
         }
 
         if app.should_close {
