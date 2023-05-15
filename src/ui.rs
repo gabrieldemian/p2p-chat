@@ -1,13 +1,51 @@
-use crate::app::{self, Page};
-use tui::{backend::Backend, Frame};
+use std::{io, time::Duration};
 
-pub fn ui<B: Backend>(f: &mut Frame<B>, app: &mut app::App) {
-    match &mut app.page {
-        Page::TopicList(page) => {
-            page.draw(f, &app.style);
+use crate::{
+    app::{AppMessage, AppStyle},
+    chat_room::ChatRoom,
+    models::network::GlobalEvent,
+    topic_list::TopicList,
+};
+use crossterm::event::{self, Event};
+use tokio::sync::mpsc::Sender;
+use tui::{backend::CrosstermBackend, Terminal};
+
+pub async fn draw_topic_list<'a>(
+    page: &mut TopicList<'a>,
+    tx: &Sender<AppMessage<'a>>,
+    tx_network: &Sender<GlobalEvent>,
+    timeout: Duration,
+) {
+    let stdout = io::stdout();
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let style = AppStyle::new();
+
+    terminal.draw(|f| page.draw(f, &style)).unwrap();
+
+    if event::poll(timeout).unwrap() {
+        if let Event::Key(k) = event::read().unwrap() {
+            page.keybindings(k.code, &tx, tx_network).await;
         }
-        Page::ChatRoom(page) => {
-            page.draw(f, &app.style);
+    }
+}
+
+pub async fn draw_chat_room<'a>(
+    page: &mut ChatRoom,
+    tx: &Sender<AppMessage<'a>>,
+    tx_network: &Sender<GlobalEvent>,
+    timeout: Duration,
+) {
+    let stdout = io::stdout();
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let style = AppStyle::new();
+
+    terminal.draw(|f| page.draw(f, &style)).unwrap();
+
+    if event::poll(timeout).unwrap() {
+        if let Event::Key(k) = event::read().unwrap() {
+            page.keybindings(k.code, &tx, tx_network).await;
         }
     }
 }

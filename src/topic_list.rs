@@ -9,7 +9,7 @@ use tui::{
 };
 
 use crate::{
-    app::{AppEvent, AppStyle, Page},
+    app::{AppMessage, AppStyle, Page},
     chat_room::ChatRoom,
     GlobalEvent,
 };
@@ -44,11 +44,11 @@ impl<'a> TopicList<'a> {
     pub async fn keybindings(
         &mut self,
         k: KeyCode,
-        tx: &Sender<AppEvent<'a>>,
+        tx: &Sender<AppMessage<'a>>,
         tx_global: &Sender<GlobalEvent>,
     ) {
         match k {
-            KeyCode::Char('q') | KeyCode::Esc => tx.send(AppEvent::Quit).await.unwrap(),
+            KeyCode::Char('q') | KeyCode::Esc => tx.send(AppMessage::Quit).await.unwrap(),
             KeyCode::Down | KeyCode::Char('j') => self.next(),
             KeyCode::Up | KeyCode::Char('k') => self.previous(),
             KeyCode::Enter => {
@@ -57,8 +57,13 @@ impl<'a> TopicList<'a> {
 
                 let chat_room = Page::ChatRoom(ChatRoom::new(topic_index));
 
-                tx_global.send(GlobalEvent::Subscribed(topic)).await.unwrap();
-                tx.send(AppEvent::ChangePage(chat_room)).await.unwrap();
+                tx_global
+                    .send(GlobalEvent::Subscribed(topic))
+                    .await
+                    .unwrap();
+                tx.send(AppMessage::ChangePage { page: chat_room })
+                    .await
+                    .unwrap();
             }
             _ => {}
         }

@@ -19,8 +19,6 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 
-use crate::BkEvent;
-
 use super::cli::Opt;
 
 // defines the behaviour of the current peer
@@ -71,7 +69,7 @@ pub struct Network {
 }
 
 impl Network {
-    pub fn new(rx: Receiver<GlobalEvent>, tx: Sender<GlobalEvent>) -> Self {
+    pub fn new(tx: Sender<GlobalEvent>, rx: Receiver<GlobalEvent>) -> Self {
         // get the object representing the CLI flags
         let opt = Opt::parse();
         // generate the peer public key (peerId)
@@ -107,7 +105,7 @@ impl Network {
             .build()
             .expect("Valid config");
 
-        let mut gossipsub = gossipsub::Behaviour::new(message_authenticity, gossipsub_config)
+        let gossipsub = gossipsub::Behaviour::new(message_authenticity, gossipsub_config)
             .expect("could not create gossipsub interface");
 
         // swarm manages all events, events, and protocols
@@ -138,7 +136,7 @@ impl Network {
         }
     }
 
-    pub async fn daemon(&mut self, tx: Sender<BkEvent>) -> () {
+    pub async fn daemon(&mut self) -> () {
         loop {
             select! {
                 event = self.event_receiver.recv() => {
@@ -212,9 +210,11 @@ impl Network {
                             String::from_utf8_lossy(&message.data),
                         );
 
-                        tx.send(BkEvent::MessageReceived(msg))
-                            .await
-                            .expect("could not send msg from bk to front");
+                        info!("got msg {msg}");
+
+                        // tx.send(BkEvent::MessageReceived(msg))
+                        //     .await
+                        //     .expect("could not send msg from bk to front");
                     },
                     SwarmEvent::Behaviour(GlobalEvent::Mdns(mdns::Event::Discovered(list))) => {
                         for (peer_id, _multiaddr) in list {

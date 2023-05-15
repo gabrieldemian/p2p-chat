@@ -12,7 +12,7 @@ use tui::{
 };
 
 use crate::{
-    app::{AppEvent, AppStyle, Page},
+    app::{AppMessage, AppStyle, Page},
     topic_list::TopicList,
     GlobalEvent,
 };
@@ -68,22 +68,25 @@ impl ChatRoom {
     pub async fn keybindings<'a>(
         &mut self,
         k: KeyCode,
-        tx: &Sender<AppEvent<'a>>,
-        tx_global: &Sender<GlobalEvent>,
+        tx: &Sender<AppMessage<'a>>,
+        tx_network: &Sender<GlobalEvent>,
     ) {
         match &self.input_mode {
             InputMode::Normal => match k {
                 KeyCode::Char('i') => self.input_mode = InputMode::Insert,
                 KeyCode::Char('q') | KeyCode::Esc => {
-                    tx.send(AppEvent::ChangePage(Page::TopicList(TopicList::new())))
-                        .await.unwrap();
+                    tx.send(AppMessage::ChangePage {
+                        page: Page::TopicList(TopicList::new()),
+                    })
+                    .await
+                    .unwrap();
                 }
                 _ => {}
             },
             InputMode::Insert => match k {
                 KeyCode::Enter => {
                     let topic = IdentTopic::new(self.name.clone());
-                    if let Ok(_) = tx_global
+                    if let Ok(_) = tx_network
                         .send(GlobalEvent::MessageReceived(topic, self.input.clone()))
                         .await
                     {
