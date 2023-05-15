@@ -1,16 +1,15 @@
 mod app;
 mod chat_room;
-mod crossterm;
 mod models;
 mod topic_list;
 mod ui;
 use app::{AppHandle, AppMessage};
 
-use models::network::{GlobalEvent, Network};
+use models::network::{NetworkMessage, Network};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 #[tokio::main]
-async fn start_tokio(tx: Sender<GlobalEvent>, rx: Receiver<GlobalEvent>, tx_app: Sender<AppMessage>) {
+async fn start_tokio(tx: Sender<NetworkMessage>, rx: Receiver<NetworkMessage>, tx_app: Sender<AppMessage>) {
     let mut network = Network::new(tx, rx);
     network.daemon(tx_app).await;
 }
@@ -21,7 +20,7 @@ async fn main() -> Result<(), String> {
 
     // `Network` will own these channels, but
     // `Frontend` will also have a `tx` to it.
-    let (tx_network, rx_network) = mpsc::channel::<GlobalEvent>(200);
+    let (tx_network, rx_network) = mpsc::channel::<NetworkMessage>(200);
     let tx_network_cloned = tx_network.clone();
 
     // `Network` will communicate with the frontend,

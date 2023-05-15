@@ -11,7 +11,7 @@ use tui::{
 use crate::{
     app::{AppMessage, AppStyle, Page},
     chat_room::ChatRoom,
-    GlobalEvent,
+    NetworkMessage,
 };
 
 #[derive(Clone, Debug)]
@@ -45,7 +45,7 @@ impl<'a> TopicList<'a> {
         &mut self,
         k: KeyCode,
         tx: &Sender<AppMessage<'a>>,
-        tx_global: &Sender<GlobalEvent>,
+        tx_global: &Sender<NetworkMessage>,
     ) {
         match k {
             KeyCode::Char('q') | KeyCode::Esc => tx.send(AppMessage::Quit).await.unwrap(),
@@ -58,7 +58,7 @@ impl<'a> TopicList<'a> {
                 let chat_room = Page::ChatRoom(ChatRoom::new(topic_index));
 
                 tx_global
-                    .send(GlobalEvent::Subscribed(topic))
+                    .send(NetworkMessage::Subscribed(topic))
                     .await
                     .unwrap();
                 tx.send(AppMessage::ChangePage { page: chat_room })

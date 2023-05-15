@@ -26,7 +26,7 @@ use super::cli::Opt;
 // defines the behaviour of the current peer
 // on the network
 #[derive(NetworkBehaviour)]
-#[behaviour(out_event = "GlobalEvent")]
+#[behaviour(out_event = "NetworkMessage")]
 pub struct AppBehaviour {
     pub gossipsub: gossipsub::Behaviour,
     pub kademlia: Kademlia<MemoryStore>,
@@ -34,7 +34,7 @@ pub struct AppBehaviour {
 }
 
 #[derive(Debug)]
-pub enum GlobalEvent {
+pub enum NetworkMessage {
     Dial(Multiaddr),
     Kademlia(KademliaEvent),
     Gossipsub(gossipsub::Event),
@@ -45,33 +45,33 @@ pub enum GlobalEvent {
     Subscribed(IdentTopic),
 }
 
-impl From<KademliaEvent> for GlobalEvent {
+impl From<KademliaEvent> for NetworkMessage {
     fn from(event: KademliaEvent) -> Self {
-        GlobalEvent::Kademlia(event)
+        NetworkMessage::Kademlia(event)
     }
 }
 
-impl From<gossipsub::Event> for GlobalEvent {
+impl From<gossipsub::Event> for NetworkMessage {
     fn from(event: gossipsub::Event) -> Self {
-        GlobalEvent::Gossipsub(event)
+        NetworkMessage::Gossipsub(event)
     }
 }
 
-impl From<mdns::Event> for GlobalEvent {
+impl From<mdns::Event> for NetworkMessage {
     fn from(event: mdns::Event) -> Self {
-        GlobalEvent::Mdns(event)
+        NetworkMessage::Mdns(event)
     }
 }
 
 pub struct Network {
     pub peer_id: PeerId,
     pub swarm: Swarm<AppBehaviour>,
-    pub event_receiver: Receiver<GlobalEvent>,
-    pub event_sender: Sender<GlobalEvent>,
+    pub event_receiver: Receiver<NetworkMessage>,
+    pub event_sender: Sender<NetworkMessage>,
 }
 
 impl Network {
-    pub fn new(tx: Sender<GlobalEvent>, rx: Receiver<GlobalEvent>) -> Self {
+    pub fn new(tx: Sender<NetworkMessage>, rx: Receiver<NetworkMessage>) -> Self {
         // get the object representing the CLI flags
         let opt = Opt::parse();
         // generate the peer public key (peerId)
@@ -143,7 +143,7 @@ impl Network {
             select! {
                 event = self.event_receiver.recv() => {
                     match event.unwrap() {
-                        GlobalEvent::Dial(addr) => {
+                        NetworkMessage::Dial(addr) => {
                             let peer_id = match addr.iter().last() {
                                 Some(Protocol::P2p(hash)) => PeerId::from_multihash(hash).expect("Valid hash."),
                                 _ => return ()
@@ -151,8 +151,8 @@ impl Network {
                             self.swarm.dial(addr.clone()).expect("to call addr");
                             self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
                         },
-                        GlobalEvent::Kademlia(e) => {info!("unhandled {:#?}", e)},
-                        GlobalEvent::MessageReceived(topic, message) => {
+                        NetworkMessage::Kademlia(e) => {info!("unhandled {:#?}", e)},
+                        NetworkMessage::MessageReceived(topic, message) => {
                             if let Err(e) =
                                 self.swarm.behaviour_mut()
                                 .gossipsub.publish(topic, message.as_bytes())
@@ -160,8 +160,8 @@ impl Network {
                                 info!("could not send msg from daemon {:?}", e);
                             };
                         },
-                        GlobalEvent::Quit => return (),
-                        GlobalEvent::Subscribed(topic) => {
+                        NetworkMessage::Quit => return (),
+                        NetworkMessage::Subscribed(topic) => {
                             info!("subscribed ??");
                             self.swarm.behaviour_mut().gossipsub
                                 .subscribe(&topic)
@@ -179,10 +179,10 @@ impl Network {
                         let opt = Opt::parse();
                         if let Some(addr) = &opt.peer {
                             self.event_sender
-                                .send(GlobalEvent::Dial(addr.clone())).await.unwrap();
+                                .send(NetworkMessage::Dial(addr.clone())).await.unwrap();
                         };
                     },
-                    SwarmEvent::Behaviour(GlobalEvent::Kademlia(_e)) => {
+                    SwarmEvent::Behaviour(NetworkMessage::Kademlia(_e)) => {
                         // info!("Received kademlia event {:#?}", e);
                     },
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
@@ -191,7 +191,7 @@ impl Network {
                         }
                     }
                     SwarmEvent::Dialing(peer_id) => info!("Dialing {peer_id}"),
-                    SwarmEvent::Behaviour(GlobalEvent::Gossipsub(gossipsub::Event::Subscribed {
+                    SwarmEvent::Behaviour(NetworkMessage::Gossipsub(gossipsub::Event::Subscribed {
                         peer_id,
                         topic,
                     })) => {
@@ -199,7 +199,7 @@ impl Network {
                             "{peer_id} subscribed to {topic}"
                         );
                     }
-                    SwarmEvent::Behaviour(GlobalEvent::Gossipsub(gossipsub::Event::Message {
+                    SwarmEvent::Behaviour(NetworkMessage::Gossipsub(gossipsub::Event::Message {
                         propagation_source: peer_id,
                         message,
                         ..
@@ -216,13 +216,13 @@ impl Network {
 
                         tx_app.send(AppMessage::MessageReceived{ message }).await.unwrap();
                     },
-                    SwarmEvent::Behaviour(GlobalEvent::Mdns(mdns::Event::Discovered(list))) => {
+                    SwarmEvent::Behaviour(NetworkMessage::Mdns(mdns::Event::Discovered(list))) => {
                         for (peer_id, _multiaddr) in list {
                             // info!("discovered new peer {peer_id}");
                             self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                         }
                     },
-                    SwarmEvent::Behaviour(GlobalEvent::Mdns(mdns::Event::Expired(list))) => {
+                    SwarmEvent::Behaviour(NetworkMessage::Mdns(mdns::Event::Expired(list))) => {
                         for (peer_id, _multiaddr) in list {
                             self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                         }

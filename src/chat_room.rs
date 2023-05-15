@@ -14,7 +14,7 @@ use tui::{
 use crate::{
     app::{AppMessage, AppStyle, Page},
     topic_list::TopicList,
-    GlobalEvent,
+    NetworkMessage,
 };
 
 #[derive(Clone, Debug)]
@@ -69,7 +69,7 @@ impl ChatRoom {
         &mut self,
         k: KeyCode,
         tx: &Sender<AppMessage<'a>>,
-        tx_network: &Sender<GlobalEvent>,
+        tx_network: &Sender<NetworkMessage>,
     ) {
         match &self.input_mode {
             InputMode::Normal => match k {
@@ -87,7 +87,7 @@ impl ChatRoom {
                 KeyCode::Enter => {
                     let topic = IdentTopic::new(self.name.clone());
                     if let Ok(_) = tx_network
-                        .send(GlobalEvent::MessageReceived(topic, self.input.clone()))
+                        .send(NetworkMessage::MessageReceived(topic, self.input.clone()))
                         .await
                     {
                         info!("keycode:enter msg here");

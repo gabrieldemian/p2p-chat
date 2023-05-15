@@ -3,7 +3,7 @@ use std::{io, time::Duration};
 use crate::{
     app::{AppMessage, AppStyle},
     chat_room::ChatRoom,
-    models::network::GlobalEvent,
+    models::network::NetworkMessage,
     topic_list::TopicList,
 };
 use crossterm::event::{self, Event};
@@ -13,7 +13,7 @@ use tui::{backend::CrosstermBackend, Terminal};
 pub async fn draw_topic_list<'a>(
     page: &mut TopicList<'a>,
     tx: &Sender<AppMessage<'a>>,
-    tx_network: &Sender<GlobalEvent>,
+    tx_network: &Sender<NetworkMessage>,
     timeout: Duration,
 ) {
     let stdout = io::stdout();
@@ -33,7 +33,7 @@ pub async fn draw_topic_list<'a>(
 pub async fn draw_chat_room<'a>(
     page: &mut ChatRoom,
     tx: &Sender<AppMessage<'a>>,
-    tx_network: &Sender<GlobalEvent>,
+    tx_network: &Sender<NetworkMessage>,
     timeout: Duration,
 ) {
     let stdout = io::stdout();

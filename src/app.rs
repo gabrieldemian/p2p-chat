@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     chat_room::ChatRoom,
-    models::network::GlobalEvent,
+    models::network::NetworkMessage,
     topic_list::*,
     ui::{draw_chat_room, draw_topic_list},
 };
@@ -14,26 +14,15 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use log::info;
 use tokio::{
-    sync::mpsc::{self, Receiver, Sender},
+    sync::mpsc::{Receiver, Sender},
     time::Instant,
 };
 use tui::{
     backend::CrosstermBackend,
     style::{Color, Style},
-    widgets::StatefulWidget,
     Terminal,
 };
-
-#[derive(Clone, Debug)]
-pub struct PageWidget<W, I>
-where
-    W: StatefulWidget,
-{
-    pub state: W::State,
-    pub items: I,
-}
 
 #[derive(Debug, Clone)]
 pub enum Page<'a> {
@@ -77,7 +66,7 @@ pub struct App<'a> {
     pub terminal: Terminal<CrosstermBackend<Stdout>>,
     pub rx: Receiver<AppMessage<'a>>,
     pub tx: Sender<AppMessage<'a>>,
-    pub tx_network: Sender<GlobalEvent>,
+    pub tx_network: Sender<NetworkMessage>,
 }
 
 // handle
@@ -92,7 +81,7 @@ where
     pub fn new(
         rx: Receiver<AppMessage<'a>>,
         tx: Sender<AppMessage<'a>>,
-        tx_network: Sender<GlobalEvent>,
+        tx_network: Sender<NetworkMessage>,
     ) -> Result<App<'a>, std::io::Error> {
         let style = AppStyle::new();
         let topic_list = TopicList::new();
@@ -167,7 +156,7 @@ where
                 self.terminal.show_cursor().unwrap();
                 self.should_close = true;
                 // send message to `Network`
-                let _ = self.tx_network.send(GlobalEvent::Quit).await;
+                let _ = self.tx_network.send(NetworkMessage::Quit).await;
             }
             AppMessage::ChangePage { page } => {
                 self.page = page;
@@ -186,7 +175,11 @@ impl<'a> AppHandle<'a>
 where
     'a: 'static,
 {
-    pub fn new(tx: Sender<AppMessage<'a>>, rx: Receiver<AppMessage<'a>>, tx_network: Sender<GlobalEvent>) -> Self {
+    pub fn new(
+        tx: Sender<AppMessage<'a>>,
+        rx: Receiver<AppMessage<'a>>,
+        tx_network: Sender<NetworkMessage>,
+    ) -> Self {
         let actor = App::new(rx, tx.clone(), tx_network);
 
         tokio::spawn(async move { actor.unwrap().run().await });
