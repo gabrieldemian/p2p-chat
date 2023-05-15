@@ -92,7 +92,7 @@ impl Network {
 
         // the message authenticity - How we expect to publish messages
         // the publisher will sign the message with his key
-        let message_authenticity = gossipsub::MessageAuthenticity::Signed(keypair.clone());
+        let message_authenticity = gossipsub::MessageAuthenticity::Signed(keypair);
 
         // protocol - kademlia
         // this is not being used at the moment.
@@ -138,7 +138,7 @@ impl Network {
         }
     }
 
-    pub async fn daemon<'a>(&mut self, tx_app: Sender<AppMessage<'a>>) -> () {
+    pub async fn daemon<'a>(&mut self, tx_app: Sender<AppMessage<'a>>) {
         loop {
             select! {
                 event = self.event_receiver.recv() => {
@@ -146,7 +146,7 @@ impl Network {
                         NetworkMessage::Dial(addr) => {
                             let peer_id = match addr.iter().last() {
                                 Some(Protocol::P2p(hash)) => PeerId::from_multihash(hash).expect("Valid hash."),
-                                _ => return ()
+                                _ => return 
                             };
                             self.swarm.dial(addr.clone()).expect("to call addr");
                             self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
@@ -160,9 +160,9 @@ impl Network {
                                 info!("could not send msg from daemon {:?}", e);
                             };
                         },
-                        NetworkMessage::Quit => return (),
+                        NetworkMessage::Quit => return ,
                         NetworkMessage::Subscribed(topic) => {
-                            info!("subscribed ??");
+                            info!("subscribed to {topic}");
                             self.swarm.behaviour_mut().gossipsub
                                 .subscribe(&topic)
                                 .expect("could not subscribe to topic");
@@ -173,7 +173,7 @@ impl Network {
                 swarm_event = self.swarm.select_next_some() => match swarm_event {
                     SwarmEvent::NewListenAddr { address, .. } => {
                         info!(
-                            "Local node is listening on {:?}",
+                            "local node is listening on {:?}",
                             address.with(Protocol::P2p(self.peer_id.into()))
                         );
                         let opt = Opt::parse();
@@ -187,7 +187,7 @@ impl Network {
                     },
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
                         if endpoint.is_dialer() {
-                            info!("Connection established - peerId: {peer_id}");
+                            info!("connection established - peerId: {peer_id}");
                         }
                     }
                     SwarmEvent::Dialing(peer_id) => info!("Dialing {peer_id}"),

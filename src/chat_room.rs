@@ -57,7 +57,7 @@ impl ChatRoom {
         let items = vec![];
 
         Self {
-            name: name.to_string(),
+            name,
             state,
             items,
             input: String::new(),
@@ -86,9 +86,10 @@ impl ChatRoom {
             InputMode::Insert => match k {
                 KeyCode::Enter => {
                     let topic = IdentTopic::new(self.name.clone());
-                    if let Ok(_) = tx_network
+                    if tx_network
                         .send(NetworkMessage::MessageReceived(topic, self.input.clone()))
                         .await
+                        .is_ok()
                     {
                         info!("keycode:enter msg here");
                         self.items.push(self.input.drain(..).collect());

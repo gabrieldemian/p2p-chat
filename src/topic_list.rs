@@ -81,7 +81,7 @@ impl<'a> TopicList<'a> {
 
         let rows = self.items.iter().map(|item| {
             let height = item
-                .into_iter()
+                .iter()
                 .map(|content| content.chars().filter(|c| *c == '\n').count())
                 .max()
                 .unwrap_or(0)

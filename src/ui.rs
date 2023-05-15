@@ -25,7 +25,7 @@ pub async fn draw_topic_list<'a>(
 
     if event::poll(timeout).unwrap() {
         if let Event::Key(k) = event::read().unwrap() {
-            page.keybindings(k.code, &tx, tx_network).await;
+            page.keybindings(k.code, tx, tx_network).await;
         }
     }
 }
@@ -45,7 +45,7 @@ pub async fn draw_chat_room<'a>(
 
     if event::poll(timeout).unwrap() {
         if let Event::Key(k) = event::read().unwrap() {
-            page.keybindings(k.code, &tx, tx_network).await;
+            page.keybindings(k.code, tx, tx_network).await;
         }
     }
 }

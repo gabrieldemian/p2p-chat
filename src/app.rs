@@ -24,9 +24,12 @@ use tui::{
     Terminal,
 };
 
+/// the current active page
 #[derive(Debug, Clone)]
 pub enum Page<'a> {
+    /// the main page where you can see all rooms
     TopicList(TopicList<'a>),
+    /// the page where you can send messages
     ChatRoom(ChatRoom),
 }
 
@@ -48,14 +51,9 @@ impl AppStyle {
 
 #[derive(Debug, Clone)]
 pub enum AppMessage<'a> {
-    ChangePage {
-        page: Page<'a>,
-        // respond_to: oneshot::Sender<Page<'a>>,
-    },
     Quit,
-    MessageReceived {
-        message: String,
-    },
+    ChangePage { page: Page<'a> },
+    MessageReceived { message: String },
 }
 
 // actor
@@ -74,10 +72,7 @@ pub struct AppHandle<'a> {
     pub tx: Sender<AppMessage<'a>>,
 }
 
-impl<'a> App<'a>
-where
-    'a: 'static,
-{
+impl<'a> App<'a> {
     pub fn new(
         rx: Receiver<AppMessage<'a>>,
         tx: Sender<AppMessage<'a>>,

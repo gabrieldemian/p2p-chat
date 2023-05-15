@@ -1,12 +1,26 @@
 # P2P Chat
+## Overview
+<pre>
+_______________________________________
+/ This project is a peer-to-peer,       \
+| encrypted chat, with vim keybindings, |
+| made possible by rust-libp2p and TUI. |
+| This is a work in progress. In the    |
+| future the chat will also support     |
+\ sending files.                        /
+ ---------------------------------------
+        \   ^__^
+         \  (oo)\_______
+            (__)\       )\/\
+                ||----w |
+                ||     ||
+</pre>
 
-To start sending messages, you first need to know your friend multiaddr. Look for a log that starts with "/ip4/192..." and send to your friend.
-1. Alice - listen for events: `RUST_LOG=info cargo run`
-2. Bob - dial Bob multiaddr: `RUST_LOG=info cargo run -- --peer /ip4/x.x.x.x/tcp/xxxxx`
-Now they are connected and can start sending messages on the terminal.
-  ------------------------------------------------------------
-    \   ^__^
-     \  (oo)\______
-        (__)\      )\/\
-           ||----w |
-           ||     ||
+## Features
+✅ - Peer to peer
+✅ - Encryption
+✅ - Vim keybindings
+✅ - Terminal based
+⏳ - File based config
+⏳ - Sharing files
+⏳ - And more
