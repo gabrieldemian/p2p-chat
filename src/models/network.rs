@@ -19,6 +19,8 @@ use tokio::{
     sync::mpsc::{Receiver, Sender},
 };
 
+use crate::app::AppMessage;
+
 use super::cli::Opt;
 
 // defines the behaviour of the current peer
@@ -136,7 +138,7 @@ impl Network {
         }
     }
 
-    pub async fn daemon(&mut self) -> () {
+    pub async fn daemon<'a>(&mut self, tx_app: Sender<AppMessage<'a>>) -> () {
         loop {
             select! {
                 event = self.event_receiver.recv() => {
@@ -205,16 +207,14 @@ impl Network {
                         let peer_id = peer_id.to_string();
                         let peer_id = peer_id[peer_id.len() - 7..].to_string();
 
-                        let msg = format!(
+                        let message = format!(
                             "{peer_id}: {}",
                             String::from_utf8_lossy(&message.data),
                         );
 
-                        info!("got msg {msg}");
+                        info!("got msg {message}");
 
-                        // tx.send(BkEvent::MessageReceived(msg))
-                        //     .await
-                        //     .expect("could not send msg from bk to front");
+                        tx_app.send(AppMessage::MessageReceived{ message }).await.unwrap();
                     },
                     SwarmEvent::Behaviour(GlobalEvent::Mdns(mdns::Event::Discovered(list))) => {
                         for (peer_id, _multiaddr) in list {

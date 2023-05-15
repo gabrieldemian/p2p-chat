@@ -16,7 +16,6 @@ use crossterm::{
 };
 use log::info;
 use tokio::{
-    select,
     sync::mpsc::{self, Receiver, Sender},
     time::Instant,
 };
@@ -65,6 +64,9 @@ pub enum AppMessage<'a> {
         // respond_to: oneshot::Sender<Page<'a>>,
     },
     Quit,
+    MessageReceived {
+        message: String,
+    },
 }
 
 // actor
@@ -164,10 +166,17 @@ where
                 .unwrap();
                 self.terminal.show_cursor().unwrap();
                 self.should_close = true;
+                // send message to `Network`
                 let _ = self.tx_network.send(GlobalEvent::Quit).await;
             }
             AppMessage::ChangePage { page } => {
                 self.page = page;
+            }
+            // This message is sent from `Network`
+            AppMessage::MessageReceived { message } => {
+                if let Page::ChatRoom(page) = &mut self.page {
+                    page.items.push(message);
+                }
             }
         }
     }
@@ -177,23 +186,11 @@ impl<'a> AppHandle<'a>
 where
     'a: 'static,
 {
-    pub fn new(tx_network: Sender<GlobalEvent>) -> Self {
-        let (tx, rx) = mpsc::channel::<AppMessage<'a>>(200);
-
+    pub fn new(tx: Sender<AppMessage<'a>>, rx: Receiver<AppMessage<'a>>, tx_network: Sender<GlobalEvent>) -> Self {
         let actor = App::new(rx, tx.clone(), tx_network);
 
         tokio::spawn(async move { actor.unwrap().run().await });
 
         Self { tx }
-    }
-
-    pub async fn change_page(&mut self, page: Page<'a>) {
-        // let (send, recv) = oneshot::channel();
-        let msg = AppMessage::ChangePage {
-            page,
-            // respond_to: send,
-        };
-        let _ = self.tx.send(msg).await;
-        // notify Network that the page has changed
     }
 }
